@@ -129,7 +129,7 @@ function addWL(video,btnname) {
 		cancelable: true
 	});
     let tagname = ''
-	if (window.location.href.match('/(c|user|channel)\/.*\/video') !== null) {
+	if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) {
 		tagname = 'video-title-link'
 	}
 	else if (window.location.href.includes('feed/subscriptions')) {
@@ -176,7 +176,7 @@ function doADDWL(btnname) {
 	var videos = null
 	var zNode = document.getElementById(btnname);
 	zNode.disabled = true
-	if (window.location.href.match('/(c|user|channel)\/.*\/video') !== null) {
+	if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) {
 		videos = Array.from(window.document.getElementsByTagName('ytd-rich-grid-renderer')[0].getElementsByTagName('ytd-rich-item-renderer'))
 	}
 	else if (window.location.href.includes('feed/subscriptions')) {
@@ -352,10 +352,12 @@ function main() {
 		var sb2btn = document.getElementById(yesterdayButton)
 		var plwlbtn = document.getElementById(playlistButton)
 
-		if (window.location.href.match('/(c|user|channel)\/.*\/video') !== null) { // Add to WatchLater Button in users channel videos
+		if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) { // Add to WatchLater Button in users channel videos
 			if (btn === null) { // if button doesn't exist
-				let lbs = document.getElementsByTagName('ytd-subscribe-button-renderer')[0]
-				createButton(lbs, channelButton, 'Add to Watch Later', 'before', lbs.firstChild, doADDWL)
+				// let lbs = document.getElementsByTagName('ytd-subscribe-button-renderer')[0] // old method
+                console.log('creating Button')
+				let lbs = document.getElementsByTagName('ytd-feed-filter-chip-bar-renderer')[0]
+				createButton(lbs, channelButton, 'Add to Watch Later', 'after', lbs.firstChild, doADDWL)
 			}
 			else {
 				btn.style.display = 'block'
