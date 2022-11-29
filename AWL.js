@@ -75,6 +75,12 @@ function fields(){
             'type': 'checkbox', // Makes this setting a text field
             'default': false // Default value if user doesn't change it
     }
+    field.deleteShorts = {
+            'section':['Shorts'],
+            'label': 'DeleteShortsFromSubscribtions', // Appears next to field
+            'type': 'checkbox', // Makes this setting a text field
+            'default': false // Default value if user doesn't change it
+        }
     return field
 
 }
@@ -107,6 +113,19 @@ function playARVideo() {
 		}
 	}
 }
+
+// deletes shorts from the subscription page
+function deleteShorts(){
+    let tagname = 'video-title'
+	let videos = Array.from(document.getElementsByTagName('ytd-grid-video-renderer'))
+    videos.forEach((video)=>{
+        let link = filtr(Array.from(video.getElementsByClassName('style-scope')), tagname).href
+        if (link.includes("/shorts/")) { // if the video is a short dont add it
+            video.remove()
+        }
+    })
+}
+
 // filters by id
 function filtr(elements, idname) {
 	return elements.filter(ol => ol.getAttribute('id') === idname)[0]
@@ -409,6 +428,9 @@ function main() {
 				createButton(todv2, yesterdayButton, 'Add to Watch Later', 'after', titcont2.firstChild, doADDWL)
 			}else{sb2btn.style.display = 'block'}
 
+            if (GM_config.get('deleteShorts')){
+                deleteShorts()
+            }
 		}
 		//else if (window.location.href.includes("/watch?v=") && GM_config.get('pressAgeBTN')) { // Auto clicks I wish to proceed on age restricted videos
 		else if (GM_config.get('pressAgeBTN')) { // Auto clicks I wish to proceed on age restricted videos
