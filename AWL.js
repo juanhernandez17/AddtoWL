@@ -5,12 +5,13 @@
 // @namespace       juanhernandez17
 // @homepageURL     https://github.com/juanhernandez17/AddtoWL
 // @icon            https://s.ytimg.com/yts/img/favicon_32-vflOogEID.png
-// @version         0.1
+// @version         0.2.2
 // @match         	http*://www.youtube.com/*
 // @require         https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @grant           GM_addStyle
 // @grant           GM_getValue
 // @grant           GM_setValue
+
 // ==/UserScript==
 
 /*----- Settings -----*/
@@ -20,14 +21,39 @@ const channelButton = "myChannelButton"; // add to watch later button in channel
 const removeWLButton = "myRemoveWLButton"; // remove all button in WL playlist
 const settingsButton = "mySettingsButton" // settings button in YT Header
 const todayButton = "myTodayButton" // add to watch later button in subscriptions/feed today header
-const yesterdayButton = "myYesterdayButton" // add to watch later button in subscriptions/feed today header
 const playlistButton = "myPlaylistButton" // add to watch later button in playlist
+const subscriptionsButton = "mySubButton" // add button to go channel by channel pressing add to watch later button
 const addWatched = "addWatched"
 const stopWatched = "stopWatched"
 const addShorts = "addShorts"
 
+/*
+     hijack stringify to add all unwatched videos at once
+     youtube will show a popup at the bottom left "Saved to Watch Later" if successful else it will say something went wrong
+     when adding many videos at once ~30+ this will take a long time to respond, adding a huge amount 100+ could timeout the request
+     TODO: divide the huge amount of unwatched videos into groups of <50 to prevent a timeout, might not be necessary
+*/
+var unwatchedVideos = []
+const origStringify = JSON.stringify;
+JSON.stringify = function () {
+    // only modify request if adding to WL
+    if (arguments[0].playlistId === 'WL') {
+        arguments[0].actions = arguments[0].actions.concat(unwatchedVideos)
+        //console.log(arguments[0].actions,unwatchedVideos)
+        const r = origStringify.apply(this,arguments)
+        unwatchedVideos = []
+        //console.log("after",unwatchedVideos)
+        return r
+    }
+    const r = origStringify.apply(this,arguments)
+    //console.log("FETCH",arguments[0].playlistId)
+    return r
+}
+
+
+
 function fields(){
-    const buttons = [channelButton,todayButton,yesterdayButton,playlistButton]
+    const buttons = [channelButton,todayButton,playlistButton]
     var field = {}
     var opts = {
         addWatched: // This is the id of the field
@@ -116,10 +142,12 @@ function playARVideo() {
 
 // deletes shorts from the subscription page
 function deleteShorts(){
-    let tagname = 'video-title'
-	let videos = Array.from(document.getElementsByTagName('ytd-grid-video-renderer'))
+    let tagname = 'video-title-link'
+	let videos = Array.from(document.getElementsByTagName('ytd-rich-item-renderer'))
+    console.log('Deleting Shorts',videos)
     videos.forEach((video)=>{
-        let link = filtr(Array.from(video.getElementsByClassName('style-scope')), tagname).href
+        let link = video.getElementById('video-title-link').href
+        // let link = filtr(Array.from(video.getElementsByClassName('style-scope')), tagname).href
         if (link.includes("/shorts/")) { // if the video is a short dont add it
             video.remove()
         }
@@ -129,6 +157,13 @@ function deleteShorts(){
 // filters by id
 function filtr(elements, idname) {
 	return elements.filter(ol => ol.getAttribute('id') === idname)[0]
+}
+
+function filtrByAttribute(elements, by, name) {
+    var arr = Array.from(elements)
+    console.log(arr)
+	return arr.filter(ol => ol.getAttribute(by) === name)[0]
+
 }
 
 function addWL(video,btnname) {
@@ -190,17 +225,53 @@ function addWL(video,btnname) {
 	return fn
 }
 
+function filterWL(video, btnname){
+    let tagname = ''
+	if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) {
+		tagname = 'video-title-link'
+	}
+	else if (window.location.href.includes('feed/subscriptions')) {
+		tagname = 'video-title'
+    }
+
+
+	let link = filtr(Array.from(video.getElementsByClassName('style-scope')), tagname).href
+	let vdid = link.substring(link.indexOf('=') + 1)
+	// way to check if video was watched but not finished
+	//    if (link.match("&t=") !== null) {
+	//      return
+	//}
+	if (video.getElementsByTagName('ytd-thumbnail-overlay-resume-playback-renderer').length !== 0 && !GM_config.get(btnname+addWatched)) { // if the video has been watched dont add it
+        if (GM_config.get(btnname+stopWatched)){
+            return -1
+        }
+		return 0
+	}
+    // may not need this anymore since youtube has created a separate tab for shorts
+	if (link.includes("/shorts/") && !GM_config.get(btnname+addShorts)) { // if the video is a short dont add it
+		return 0
+    }
+    return vdid
+
+}
+
 function doADDWL(btnname) {
 	var final = 0
 	var videos = null
 	var zNode = document.getElementById(btnname);
 	zNode.disabled = true
 	if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) {
-		videos = Array.from(window.document.getElementsByTagName('ytd-rich-grid-renderer')[0].getElementsByTagName('ytd-rich-item-renderer'))
+        let res = document.getElementsByTagName('ytd-rich-grid-renderer')
+        if (res.length > 1) {
+            res = filtrByAttribute(res,'is-default-grid','').getElementsByTagName('ytd-rich-item-renderer')
+        } else {res = res[0]}
+
+        videos = Array.from(res.getElementsByTagName('ytd-rich-item-renderer'))
 	}
 	else if (window.location.href.includes('feed/subscriptions')) {
-		let cont = getParentByTagName(zNode, 'YTD-ITEM-SECTION-RENDERER')
-		videos = Array.from(cont.getElementsByTagName('ytd-grid-video-renderer'))
+        videos = Array.from(filtrByAttribute(document.getElementsByTagName('ytd-rich-grid-renderer'),'is-default-grid','').getElementsByTagName('ytd-rich-item-renderer'))
+		//let cont = getParentByTagName(zNode, 'YTD-ITEM-SECTION-RENDERER')
+		//videos = Array.from(cont.getElementsByTagName('ytd-grid-video-renderer'))
 	}
 	else {
 		alert("Cant Do That Here")
@@ -209,29 +280,27 @@ function doADDWL(btnname) {
     let oldurl = window.location.href
 	// let ch = window.prompt("How many vids to add? All, !Watched, <number>, <url> of last to add");
 	// console.log(typeof(ch))
-	var countd = videos.length
-	var count = 0
+    // console.log(videos)
+    for (const vid of videos.slice(1)) {
+        let x = filterWL(vid, btnname)
+        if (x===-1){break}
+        if (x!=0) {
+            unwatchedVideos.push({
+            "action":"ACTION_ADD_VIDEO",
+            "addedVideoId":x
+            })
+        }
+        //console.log("UnwatchedVIds",unwatchedVideos.length)
+    }
 
-	var x = setInterval(function () {
-		// Display the result in the element with id="demo"
-		zNode.innerHTML = 'Adding ' + (countd - count) + ' wait ' + ((countd - count) / 2) + ' Seconds';
+    zNode.innerHTML = 'Adding ' + (unwatchedVideos.length+1) + ' wait';
+    addWL(videos[0],btnname)
+    setTimeout(() => {
+        zNode.disabled = false
+        zNode.innerHTML = "Add to Watch Later"
+    }, 3000)
 
-		// If the count down is finished, write some text
-		if ( oldurl !== window.location.href || countd === count || (videos[count].getElementsByTagName('ytd-thumbnail-overlay-resume-playback-renderer').length !== 0 && (GM_config.get(btnname+stopWatched) && !window.location.href.includes("feed/subscriptions")))) { // check if video was watched
-
-			zNode.innerHTML = "Finished Adding " + final;
-			setTimeout(() => {
-				zNode.disabled = false
-				zNode.innerHTML = "Add to Watch Later"
-			}, 3000)
-			clearInterval(x);
-		}
-		else { final += addWL(videos[count],btnname) }	// add to watch later
-		count += 1
-
-	}, 500);//wait .5seconds to do the next interation
-
-
+    return
 }
 
 function removeWL(video) {
@@ -352,6 +421,8 @@ function createButton(loc, buttonname, buttonmessage, insertfunc, childnode, but
 
 function opGMf(zEvent) { GM_config.open() }
 
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
 function getParentByTagName(node, tagname) {
 	let parent = node
 	while (parent.tagName !== tagname.toUpperCase() && parent !== null) {
@@ -360,22 +431,34 @@ function getParentByTagName(node, tagname) {
 	return parent
 }
 
+function deleteShortsSection() {
+    if (window.location.href.includes("feed/subscriptions")){
+        let shelfs = Array.from(document.getElementsByTagName('ytd-rich-shelf-renderer'))
+        let shelfs2 = Array.from(document.getElementsByTagName('ytd-rich-section-renderer'))
+        console.log('shelfs',shelfs2)
+        shelfs.forEach(ol => {
+            if (ol.getAttribute('is-shorts') === '') {ol.remove();console.log('deleted '+ol)}
+        })
+    }
+}
+
 function main() {
-	//document.addEventListener('yt-page-data-updated', () => { // this event is called when the youtube view is updated to new url*?
+	// document.addEventListener('yt-page-data-updated', () => { // this event is called when the youtube view is updated to new url*?
+	//document.addEventListener("yt-service-request-completed", () => { // this event is called when the youtube view is updated to new url*?
 	document.addEventListener("yt-navigate-finish", () => { // this event is called when the youtube view is updated to new url*?
         //var selection = parseInt(window.prompt("Please enter a number from 1 to 100", ""), 10);
 		var btn = document.getElementById(channelButton);
 		var WLbtn = document.getElementById(removeWLButton);
 		var stbtn = document.getElementById(settingsButton)
 		var sbbtn = document.getElementById(todayButton)
-		var sb2btn = document.getElementById(yesterdayButton)
+        var subbtn = document.getElementById(subscriptionsButton)
 		var plwlbtn = document.getElementById(playlistButton)
 
 		if (window.location.href.match('\/(c|user|channel|\@.*)\/.*|\@.*\/video') !== null) { // Add to WatchLater Button in users channel videos
 			if (btn === null) { // if button doesn't exist
 				// let lbs = document.getElementsByTagName('ytd-subscribe-button-renderer')[0] // old method
                 console.log('creating Button')
-				let lbs = document.getElementsByTagName('ytd-feed-filter-chip-bar-renderer')[0]
+                let lbs = filtrByAttribute(document.getElementsByTagName('ytd-feed-filter-chip-bar-renderer'),'component-style','FEED_FILTER_CHIP_BAR_STYLE_TYPE_CHANNEL_PAGE_GRID')
 				createButton(lbs, channelButton, 'Add to Watch Later', 'after', lbs.firstChild, doADDWL)
 			}
 			else {
@@ -417,20 +500,11 @@ function main() {
 		}
 		else if (window.location.href.includes("feed/subscriptions")) { // Add to Watch Later Button in Today/Yesterday Headers of subscriptions page
 			if (sbbtn === null) { // if button doesn't exist
-				let todv = document.getElementsByTagName('ytd-item-section-renderer')[0]
+				let todv = document.getElementsByTagName('ytd-rich-section-renderer')[0]
 				let titcont = filtr(Array.from(todv.getElementsByClassName('style-scope')), 'title-container')
 				createButton(todv, todayButton, 'Add to Watch Later', 'after', titcont.firstChild, doADDWL)
 			}else{sbbtn.style.display = 'block'}
 
-			if (sb2btn === null) { // if button doesn't exist
-				let todv2 = document.getElementsByTagName('ytd-item-section-renderer')[1]
-				let titcont2 = filtr(Array.from(todv2.getElementsByClassName('style-scope')), 'title-container')
-				createButton(todv2, yesterdayButton, 'Add to Watch Later', 'after', titcont2.firstChild, doADDWL)
-			}else{sb2btn.style.display = 'block'}
-
-            if (GM_config.get('deleteShorts')){
-                deleteShorts()
-            }
 		}
 		//else if (window.location.href.includes("/watch?v=") && GM_config.get('pressAgeBTN')) { // Auto clicks I wish to proceed on age restricted videos
 		else if (GM_config.get('pressAgeBTN')) { // Auto clicks I wish to proceed on age restricted videos
@@ -440,7 +514,7 @@ function main() {
 
                 // this bottom part should work if you can guarantee 'yt-page-data-updated' happens before 'yt-player-updated'
 				//document.addEventListener('yt-player-updated', playARVideo, { 'once': true })
-				document.addEventListener('yt-player-updated', playARVideo)
+				//document.addEventListener('yt-player-updated', playARVideo)
 			//}
 		}
 		else { // hides some buttons if you are not in the page they are ment to be
@@ -457,15 +531,49 @@ function main() {
             let masstart = filtr(Array.from(masth.getElementsByClassName('style-scope')), 'start')
             createButton(masstart, settingsButton, 'Settings', 'after', masstart, opGMf)
         }
+        if (subbtn == null) {
+            //let submath = document.getElementsByTagName('ytd-guide-section-renderer')[1]
+			//let substart = filtr(Array.from(submath.getElementsByClassName('style-scope')), 'guide-section-title')
+            //createButton(submath, subscriptionsButton, 'Bulk Add Watch Later', 'after', substart.firstChild, console.log('hi'))
+        }
 	});
 
+    //if (GM_config.get('deleteShorts')) {
+    //    window.addEventListener('yt-service-request-completed', function(e) {
+    //        deleteShortsSection()
+    //    })
+    //}
 }
 
 (function (window) {
 
 	"use strict";
 	main()
+    document.addEventListener("yt-page-data-fetched", () => {
+        let videos = Array.from(document.getElementsByTagName('ytd-rich-item-renderer'))
+        console.log('Deleting SR Shorts',videos)
+    })
+    /*
+    window.addEventListener('yt-page-data-updated', function(e) {
+        console.log('yt-page-data-updated', e)
+    })
+    window.addEventListener('yt-add-element-to-app', function(e) {
+        console.log('yt-add', e)
+    })
+    window.addEventListener('yt-navigate-finish', function(e) {
+        console.log('yt-navigate-finish', e)
+    })
+    window.addEventListener('yt-navigate-start', function(e) {
+        console.log('yt-navigate-start', e)
+    })
+    window.addEventListener('yt-service-request-completed', function(e) {
+        console.log('yt', e)
+    })
+    */
+
+
 })(window);
+
 
 
 //--- Style our newly added elements using CSS.
@@ -505,3 +613,11 @@ GM_addStyle(`
 			cursor:                 pointer;
 		}
 	` );
+
+
+
+
+
+
+
+
